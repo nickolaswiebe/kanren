@@ -1,114 +1,89 @@
-def vars_of(func):
-	return func.func_code.co_varnames[:func.func_code.co_argcount]
-
-class Variable:
-	def __init__(self, name):
-		self.name = name
+class Var:
+	def __init__(self, num):
+		self.num = num
+	def __eq__(self, other):
+		return isinstance(other, Var) and self.num == other.num
 	def __repr__(self):
-		return "Variable('%s')" % self.name
-
+		return "V%i" % self.num
+class Ref:
+	def __init__(self, num):
+		self.num = num
 class State:
-	def __init__(self, variables=None, values=None):
-		self.variables = variables or []
-		self.values = values or {}
-	def create_variables(self, names):
-		new_variables = [Variable(name) for name in names]
-		st = State(self.variables + new_variables, self.values)
-		return st, new_variables
-	def assign_values(self, new_values):
-		v = self.values.copy()
-		v.update(new_values)
-		return State(self.variables, v)
-	def value_of(self, key):
-		if key in self.values:
-			return self.value_of(self.values[key])
-		else:
-			return key
+	def __init__(self, nvars=0, vals=[]):
+		self.nvars = nvars
+		self.vals = vals
+	def get(self, var):
+		#print var
+		if isinstance(var, Var):
+			if self.vals[var.num] is None:
+				return var
+			return self.get(self.vals[var.num])
+		if isinstance(var, tuple):
+			return tuple(map(self.get, var))
+		return var
+	def set(self, k, v):
+		vals = self.vals[:]
+		vals[k] = v
+		return State(self.nvars, vals)
 	def unify(self, a, b):
-		a = self.value_of(a)
-		b = self.value_of(b)
+		a = self.get(a)
+		b = self.get(b)
 		if a == b:
 			return self
-		elif isinstance(a, Variable):
-			return self.assign_values({a: b})
-		elif isinstance(b, Variable):
-			return self.assign_values({b: a})
-		elif isinstance(a, Pair) and isinstance(b, Pair):
-			state = self.unify(a.left, b.left)
-			if state:
-				return state.unify(a.right, b.right)
-	def value_of(self, key):
-		if key in self.values:
-			return self.value_of(self.values[key])
-		elif isinstance(key, Pair):
-			return Pair(
-				self.value_of(key.left),
-				self.value_of(key.right))
-		else:
-			return key
-
-class Goal:
-	def __init__(self, block):
-		self.block = block
-	def pursue_in(self, state):
-		return self.block(state)
-	def pursue_in_each(self, states):
-		first = next(states)
-		remaining = states
-		first_stream = self.pursue_in(first)
-		remaining_streams = self.pursue_in_each(remaining)
-		for state in interleave_with(first_stream, remaining_streams):
-			yield state
-
-def Goal_equal(a, b):
-	def do(state):
-		state = state.unify(a, b)
-		if state:
-			yield state
-	return Goal(do)
-
-def Goal_with_variables(block):
-	names = vars_of(block)
-	def do(state):
-		state, variables = state.create_variables(names)
-		goal = block(*variables)
-		return goal.pursue_in(state)
-	return Goal(do)
-
-def Goal_either(first_goal, second_goal):
-	def do(state):
-		for x in first_goal.pursue_in(state):
+		if isinstance(a, Var):
+			return self.set(a.num, b)
+		if isinstance(b, Var):
+			return self.set(b.num, a)
+		if isinstance(a, tuple) and isinstance(b, tuple) and len(a) == len(b):
+			st = self.unify(a[0], b[0])
+			if st is None: return None
+			return st.unify(a[1:], b[1:])
+		return None
+def fresh(f):
+	n = f.func_code.co_argcount
+	def goal(st):
+		return f(*[Var(i + st.nvars) for i in xrange(n)])(State(st.nvars + n, st.vals + [None] * n))
+	return goal
+def eq(a, b):
+	def goal(st):
+		r = st.unify(a, b)
+		if r is not None:
+			yield r
+	return goal
+def combine(xss):
+	for xs in xss:
+		for x in xs:
 			yield x
-		for x in second_goal.pursue_in(state):
-			yield x
-	return Goal(do)
-
-def interleave_with(*enumerators):
-	enumerators = list(enumerators)
-	while enumerators != []:
-		enumerator = enumerators.pop(0)
-		yield next(enumerator)
-		enumerators.append(enumerator)
-
-def Goal_both(first_goal, second_goal):
-	def do(state):
-		for state in first_goal.pursue_in(state):
-			for x in second_goal.pursue_in(state):
-				yield x
-	return Goal(do)
-
-class Pair:
-	def __init__(self, left, right):
-		self.left = left
-		self.right = right
-	def __repr__(self):
-		return "(%s, %s)" % (self.left, self.right)
-
-goal = Goal_with_variables(lambda x, y, z:
-	Goal_both(
-		Goal_either(Goal_equal(x, 0), Goal_equal(x, 1)),
-		Goal_both(
-			Goal_either(Goal_equal(y, 0), Goal_equal(y, 1)),
-			Goal_either(Goal_equal(z, 0), Goal_equal(z, 1)) )))
-for state in goal.pursue_in(State()):
-	print state.value_of(state.variables[0]), state.value_of(state.variables[1]), state.value_of(state.variables[2])
+def or2(a, b):
+	def goal(st):
+		return combine(iter([a(st), b(st)]))
+	return goal
+def and2(a, b):
+	def goal(st):
+		return combine(b(st2) for st2 in a(st))
+	return goal
+goal = fresh(lambda x, y, z:
+	and2(
+		or2(eq(x, 0), eq(x, 1)),
+		and2(
+			or2(eq(y, 0), eq(y, 1)),
+			or2(eq(z, 0), eq(z, 1)) )))
+def append(a, b, c):
+	return or2(
+		and2(
+			eq(a, ()),
+			eq(b, c)
+		),
+		fresh(lambda first, rest_of_a, rest_of_c:
+			and2(
+				and2(
+					eq(a, (first, rest_of_a)),
+					eq(c, (first, rest_of_c))
+				),
+				append(rest_of_a, b, rest_of_c)
+			)
+		)
+	)
+goal = fresh(lambda a, b: append(a, b, ('h', ('e', ('l', ('l', ('o', ())))))))
+for st in goal(State()):
+	print st.get(Var(0)), st.get(Var(1))
