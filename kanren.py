@@ -1,73 +1,44 @@
-class Var:
-	def __init__(self, num):
-		self.num = num
-	def __eq__(self, other):
-		return isinstance(other, Var) and self.num == other.num
-	def __repr__(self):
-		return "V%i" % self.num
-class Ref:
-	def __init__(self, num):
-		self.num = num
-class State:
-	def __init__(self, nvars=0, vals=[]):
-		self.nvars = nvars
-		self.vals = vals
-	def get(self, var):
-		#print var
-		if isinstance(var, Var):
-			if self.vals[var.num] is None:
-				return var
-			return self.get(self.vals[var.num])
-		if isinstance(var, tuple):
-			return tuple(map(self.get, var))
-		return var
-	def set(self, k, v):
-		vals = self.vals[:]
-		vals[k] = v
-		return State(self.nvars, vals)
-	def unify(self, a, b):
-		a = self.get(a)
-		b = self.get(b)
-		if a == b:
-			return self
-		if isinstance(a, Var):
-			return self.set(a.num, b)
-		if isinstance(b, Var):
-			return self.set(b.num, a)
-		if isinstance(a, tuple) and isinstance(b, tuple) and len(a) == len(b):
-			st = self.unify(a[0], b[0])
-			if st is None: return None
-			return st.unify(a[1:], b[1:])
-		return None
-def fresh(f):
-	n = f.func_code.co_argcount
-	def goal(st):
-		return f(*[Var(i + st.nvars) for i in xrange(n)])(State(st.nvars + n, st.vals + [None] * n))
-	return goal
-def eq(a, b):
-	def goal(st):
-		r = st.unify(a, b)
-		if r is not None:
-			yield r
-	return goal
+args = lambda f: f.func_code.co_varnames[:f.func_code.co_argcount]
 def combine(xss):
 	for xs in xss:
 		for x in xs:
 			yield x
-def or2(a, b):
-	def goal(st):
-		return combine(iter([a(st), b(st)]))
-	return goal
-def and2(a, b):
-	def goal(st):
-		return combine(b(st2) for st2 in a(st))
-	return goal
-goal = fresh(lambda x, y, z:
-	and2(
-		or2(eq(x, 0), eq(x, 1)),
-		and2(
-			or2(eq(y, 0), eq(y, 1)),
-			or2(eq(z, 0), eq(z, 1)) )))
+class Var:
+	def __init__(self, name):
+		self.name = name
+	def __repr__(self):
+		return self.name
+class Env:
+	def __init__(self, vars=[], vals={}):
+		self.vars = vars
+		self.vals = vals
+	def get(self, var):
+		if var in self.vals: return self.get(self.vals[var])
+		if isinstance(var, tuple): return tuple(map(self.get, var))
+		return var
+	def set(self, var, val):
+		vals = self.vals.copy()
+		vals[self.get(var)] = val
+		return Env(self.vars, vals)
+	def unify(self, a, b):
+		a = self.get(a)
+		b = self.get(b)
+		if a == b: return self
+		if isinstance(a, Var): return self.set(a, b)
+		if isinstance(b, Var): return self.set(b, a)
+		if isinstance(a, tuple) and isinstance(b, tuple) and len(a) == len(b):
+			for x, y in zip(a, b):
+				self = self.unify(x, y)
+				if self is None: return None
+			return self
+		return None
+	def fresh(self, names):
+		vars = map(Var, names)
+		return vars, Env(self.vars + vars, self.vals)
+fresh = lambda f: lambda e: (lambda(vars, e2): f(*vars)(e2))(e.fresh(args(f)))
+or2 = lambda a, b: lambda e: combine(iter([a(e), b(e)]))
+and2 = lambda a, b: lambda e: combine(b(e2) for e2 in a(e))
+eq = lambda a, b: lambda e: (lambda r: iter([r]) if r else iter([]))(e.unify(a, b))
 def append(a, b, c):
 	return or2(
 		and2(
@@ -84,6 +55,6 @@ def append(a, b, c):
 			)
 		)
 	)
-goal = fresh(lambda a, b: append(a, b, ('h', ('e', ('l', ('l', ('o', ())))))))
-for st in goal(State()):
-	print st.get(Var(0)), st.get(Var(1))
+goal = fresh(lambda a, b: append(a, b, ('a', ('b', ('c', ())))))
+for e in goal(Env()):
+	print e.get(e.vars[0]), e.get(e.vars[1])
