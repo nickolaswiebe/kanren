@@ -1,8 +1,20 @@
+from collections import defaultdict as ddict
 args = lambda f: f.func_code.co_varnames[:f.func_code.co_argcount]
 def combine(xss):
-	for xs in xss:
-		for x in xs:
-			yield x
+	run = [next(xss)]
+	while run != []:
+		for _ in xrange(len(run)):
+			xs = run.pop(0)
+			try:
+				x = next(xs)
+				yield x
+				run.append(xs)
+			except StopIteration:
+				pass
+		try:
+			run.append(next(xss))
+		except StopIteration:
+			pass
 class Var:
 	def __init__(self, name):
 		self.name = name
@@ -17,8 +29,9 @@ class Env:
 		if isinstance(var, tuple): return tuple(map(self.get, var))
 		return var
 	def set(self, var, val):
+		var = self.get(var)
 		vals = self.vals.copy()
-		vals[self.get(var)] = val
+		vals[var] = val
 		return Env(self.vars, vals)
 	def unify(self, a, b):
 		a = self.get(a)
@@ -35,10 +48,11 @@ class Env:
 	def fresh(self, names):
 		vars = map(Var, names)
 		return vars, Env(self.vars + vars, self.vals)
+reify = lambda r: iter([r]) if r else iter([])
 fresh = lambda f: lambda e: (lambda(vars, e2): f(*vars)(e2))(e.fresh(args(f)))
 or2 = lambda a, b: lambda e: combine(iter([a(e), b(e)]))
 and2 = lambda a, b: lambda e: combine(b(e2) for e2 in a(e))
-eq = lambda a, b: lambda e: (lambda r: iter([r]) if r else iter([]))(e.unify(a, b))
+eq = lambda a, b: lambda e: reify(e.unify(a, b))
 def append(a, b, c):
 	return or2(
 		and2(
