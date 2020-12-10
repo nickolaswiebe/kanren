@@ -71,6 +71,8 @@ class Env:
 		vars = map(Var, names)
 		return vars, Env(self.vars + vars, self.vals, self.conds)
 	def cond(self, cond):
+		if not cond.check(self):
+			return None
 		conds = self.conds.copy()
 		for var in cond.vars:
 			if isinstance(var, Var):
