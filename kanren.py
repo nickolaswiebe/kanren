@@ -36,6 +36,10 @@ class Var:
 		self.name = name
 	def __repr__(self):
 		return self.name
+def occurs(term, var):
+	if isinstance(term, tuple):
+		return any(occurs(t, var) for t in term)
+	return term == var
 class Env:
 	def __init__(self, vars=[], vals={}, conds=ddict(set)):
 		self.vars = vars
@@ -58,6 +62,8 @@ class Env:
 	def unify(self, a, b):
 		a = self.get(a)
 		b = self.get(b)
+		if occurs(a, b): return None
+		if occurs(b, a): return None
 		if a == b: return self
 		if isinstance(a, Var): return self.set(a, b)
 		if isinstance(b, Var): return self.set(b, a)
